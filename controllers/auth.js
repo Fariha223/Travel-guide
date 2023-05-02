@@ -1,56 +1,52 @@
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import bcrypt from "bcryptjs";
+import { createError } from "../utils/error.js";
+import jwt from "jsonwebtoken";
 
-//user registration
+export const register = async (req, res, next) => {
+  try {
+    const salt = bcrypt.genSaltSync(10);
+    const hash = bcrypt.hashSync(req.body.password, salt);
 
-export const register = async(req, res) => {
-    try{
-        const{
-            firstName,
-            lastName,
-            email,
-            password,
-            picturePath,
-            viewProfile
-        } = req.body;
-      
-      const salt =  await bcrypt.genSalt();
-      const passwordHash = await bcrypt.hash(password, salt);
+    const newUser = new User({
+      ...req.body,
+      password: hash,
+    });
 
-      const newUser = new User({
-        firstName,
-        lastName,
-        email,
-        password: passwordHash,
-        picturePath,
-        viewProfile
-      });
-
-      const savedUser = await newUser.save();
-      res.status(201).json(savedUser);
-
-    } catch(err){
-        res.status(500).json({ error: err.message });
-    }
-};
-
-// logging in
-export const login = async (req, res) => {
-  try{
-    const { email, password} = req.body;
-    const user = await User.findOne({email: email});
-    if(!user) return res.status(400).json({msg: "User does not exist. "});
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if(!isMatch) return res.status(400).json({msg:"Invalid"});
-    
-    const token = jwt.sign({ id: user._id}, process.env.JWT_SECRET);
-    delete user.password;
-    res.status(200).json({token, user});
-  } catch(err) {
-    res.status(500).json({ error: err.message });
+    await newUser.save();
+    res.status(200).send("User has been created.");
+  } catch (err) {
+    next(err);
   }
 };
+export const login = async (req, res, next) => {
+  try {
+    const user = await User.findOne({ username: req.body.username });
+    if (!user) return next(createError(404, "User not found!"));
+
+    const isPasswordCorrect = await bcrypt.compare(
+      req.body.password,
+      user.password
+    );
+    if (!isPasswordCorrect)
+      return next(createError(400, "Wrong password or username!"));
+
+    const token = jwt.sign(
+      { id: user._id, isAdmin: user.isAdmin },
+      process.env.JWT
+    );
+
+    const { password, isAdmin, ...otherDetails } = user._doc;
+    res
+      .cookie("access_token", token, {
+        httpOnly: true,
+      })
+      .status(200)
+      .json({ details: { ...otherDetails }, isAdmin });
+  } catch (err) {
+    next(err);
+  }
+};
+
 
 
